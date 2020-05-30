@@ -1,0 +1,37 @@
+cabal-version: 2.2
+
+-- This file has been generated from package.yaml by hpack version 0.31.2.
+--
+-- see: https://github.com/sol/hpack
+--
+-- hash: d7b5eb5c92c31077cc6a2f418503b709c9e79768eed419c6979927cad6bd3f0f
+
+name:           tak
+version:        0.1.0.0
+build-type:     Simple
+extra-source-files:
+
+common shared-properties
+  default-language: Haskell2010
+  ghc-options:
+    -Wall
+
+library
+  import: shared-properties
+  exposed-modules:
+    Tak
+  build-depends:
+    base == 4.*
+    ,lattices == 2.0.2
+
+executable tak
+  main-is: Main.hs
+  -- other-modules:
+  build-depends:
+    base == 4.*
+    ,lattices == 2.0.2
+    ,ansi-terminal == 0.10.3
+    ,mtl == 2.2.2
+    ,readline == 1.0.3.0
+    ,random == 1.1
+    ,parsec == 3.1.14.0

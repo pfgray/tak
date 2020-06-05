@@ -21,6 +21,7 @@ mainLoop = do
     Unrecognized s -> (liftIO $ putStrLn ("\"" ++ s ++ "\" is not a valid command")) >>= (\_ -> mainLoop)
     Move t -> applyTurn t >>= (\_ -> mainLoop)
     Show   -> get >>= (\s -> liftIO $ putStrLn (printState s) ) >>= (\_ -> mainLoop)
+    Empty  -> mainLoop
 
 data Position = Position Int String
 
@@ -45,6 +46,7 @@ data Command =
   Exit
   | Echo String
   | Unrecognized String
+  | Empty
   --  | StartGame Integer
   | Move Turn
   | Show
@@ -52,7 +54,7 @@ data Command =
 
 parseCommand :: String -> Command
 parseCommand s = 
-  case parse (optionMaybe (parseExit <|> parseShow <|> parseMove)) "command" s of
+  case parse (optionMaybe (parseExit <|> parseShow <|> parseMove <|> parseEmpty)) "command" s of
     (Left _)           -> Unrecognized s
     (Right Nothing)    -> Unrecognized s
     (Right (Just cmd)) -> cmd
@@ -75,3 +77,6 @@ parseMove = do
   _ <- spaces
   t <- parseTurn
   return (Move t)
+
+parseEmpty :: GenParser Char st Command
+parseEmpty = Empty <$ spaces

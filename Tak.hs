@@ -4,7 +4,11 @@ module Tak where
 -- functions from last week to use 'Maybe' to indicate failure (rather than exploding with @error@).
 -- Third, we'll start looking at how we might implement the board for our tak game.
 
+import Data.List
+import Data.Monoid
+import Data.Tuple
 
+import Debug.Trace
 
 -- Let's find the index of an element in a list (i.e., the position of the first occurence)---the
 -- element might not be there:
@@ -110,10 +114,20 @@ stackHeight (Flat _ st) = 1 + stackHeight st
 --
 -- >>> takeStack 2 (Cap PBlack)
 -- Nothing
-takeStack :: Int -> Stack -> Maybe Stack
+-- takeStack :: Int -> Stack -> Maybe Stack
+-- takeStack m stack = go (stackHeight stack - m) stack
+--   where go 0 st = Just st
+--         go n (Flat _ st) = go (n - 1) st
+--         go _ _ = Nothing
+
+-- hmm no bifunctor in core?
+leftMap :: (a -> z) -> (a, b) -> (z, b)
+leftMap f (x, y) = (f x, y)
+
+takeStack :: Int -> Stack -> Maybe (Stack, Stack)
 takeStack m stack = go (stackHeight stack - m) stack
-  where go 0 st = Just st
-        go n (Flat _ st) = go (n - 1) st
+  where go 0 st = Just (Top, st)
+        go n (Flat p st) = fmap (leftMap (\s -> Flat p s)) (go (n - 1) st)
         go _ _ = Nothing
 
 
@@ -124,13 +138,13 @@ takeStack m stack = go (stackHeight stack - m) stack
 --
 -- >>> dropStack 2 (Cap PBlack)
 -- Nothing
-dropStack :: Int -> Stack -> Maybe Stack
-dropStack m stack = go (stackHeight stack - m) stack
-  where go 0 _           = Just Top
-        go 1 (Cap p)     = Just (Cap p)
-        go 1 (Stand p)   = Just (Stand p)
-        go n (Flat p st) = fmap (\s -> Flat p s) (go (n - 1) st) 
-        go _ _           = Nothing
+dropStack :: Int -> Stack -> Maybe (Stack, Stack)
+dropStack 0 s           = Just (Top, s)
+dropStack 1 (Cap p)     = Just (Cap p, Top)
+dropStack 1 (Stand p)   = Just (Stand p, Top)
+dropStack 1 (Flat p st) = Just (Flat p Top, st)
+dropStack n (Flat p st) = fmap (\(d, s) -> (Flat p d, s)) (dropStack (n - 1) st)
+dropStack _ _           = Nothing
 
 -- Part 3, A Simple Tak Board
 
@@ -227,6 +241,106 @@ placePiece player place@(Placement piece pos) ((pos', stack): restBoard) =
     (False, _) -> fmap ((pos', stack):) (placePiece player place restBoard)
     (True, Top) -> Just ((pos, buildStack player piece) : restBoard)
     (True, _) -> Nothing
+
+owner :: Stack -> Maybe Player
+owner Top          = Nothing
+owner (Cap p)      = Just p
+owner (Stand p)    = Just p
+owner (Flat p Top) = Just p
+owner (Flat _ s)   = owner s
+
+  -- = Top
+  -- | Cap   Player
+  -- | Stand Player
+  -- | Flat  Player Stack
+
+-- take n stones from a stack, and drop
+
+toEither :: e -> Maybe a -> Either e a
+toEither e Nothing = Left e
+toEither _ (Just a) = Right a
+
+type TurnResult t = Either String t
+
+stackAt :: Pos -> Board -> TurnResult Stack
+stackAt p b = fmap snd $ toEither ("Position " ++ show p ++ "  doesn't exit") $ find (\(pos,_) -> pos == p) b
+
+posExists :: Pos -> Board -> Bool
+posExists p b = getAny $ foldMap ((\p' -> Any (p' == p)) . fst) b
+
+posIsOwnedBy :: Pos -> Board -> Player -> TurnResult ()
+posIsOwnedBy p b player = do
+  s <- stackAt p b
+  o <- toEither ("Position " ++ (show p) ++ " is not owned by anyone")  (owner s)
+  if o == player
+    then return ()
+    else Left ("Position " ++ (show p) ++ " is not owned by " ++ (show player))
+
+modifyStackAt :: Pos -> Board -> (Stack -> TurnResult Stack) -> TurnResult Board
+modifyStackAt p b f = do
+  s <- stackAt p b
+  s' <- f s
+  return (replaceStack p b s')
+
+replaceStack :: Pos -> Board -> Stack -> Board
+replaceStack p b s = fmap go b
+  where go (p', s') = if p' == p then (p, s) else (p', s')
+
+moveRight :: Char -> Maybe Char
+moveRight 'a' = Just 'b'
+moveRight 'b' = Just 'c'
+moveRight 'c' = Just 'd'
+moveRight 'd' = Just 'e'
+moveRight 'e' = Just 'f'
+moveRight 'f' = Just 'g'
+moveRight 'g' = Just 'h'
+moveRight 'h' = Nothing
+
+moveLeft :: Char -> Maybe Char
+moveLeft 'a' = Nothing
+moveLeft 'b' = Just 'a'
+moveLeft 'c' = Just 'b'
+moveLeft 'd' = Just 'c'
+moveLeft 'e' = Just 'd'
+moveLeft 'f' = Just 'e'
+moveLeft 'g' = Just 'f'
+moveLeft 'h' = Just 'g'
+
+moveDirection :: Pos -> Direction -> Maybe Pos
+moveDirection p DDown  = Just $ swap $ fmap (\x -> x-1) (swap p)
+moveDirection p DUp    = Just $ swap $ fmap (+1) (swap p)
+moveDirection p DLeft  = fmap (\r -> (fst p, r)) (moveLeft $ snd p)
+moveDirection p DRight = fmap (\r -> (fst p, r)) (moveRight $ snd p)
+
+applyMovement :: Player -> Movement -> Board -> TurnResult Board
+applyMovement pl m b = do
+  _  <- posIsOwnedBy (from m) b pl
+  s  <- stackAt (from m) b
+  (d, s') <- toEither (takeError m) (takeStack (takeStones m) s)
+  -- newPosition <- toEither ("couldnt move " ++ (show (direction m)) ++ " from " ++ (show $ from m) ) (moveDirection (from m) (direction m))
+  go (from m) (replaceStack (from m) b d) s' (drops m)
+  where go :: Pos -> Board -> Stack -> [Int] -> TurnResult Board
+        go _ b _ []      = return b
+        go prevP b taken (d:ds)  = do
+          p   <- toEither ("couldnt move " ++ (show (direction m)) ++ " from " ++ (show prevP)) (moveDirection prevP (direction m)) -- don't move if it's the last step...
+          _  <- if posExists p b then Right () else Left (dropError "pos doesn't exist" d taken p)
+          dropOn <- stackAt p b
+          (droppedPieces, stackLeft) <- toEither (dropError "couldn't drop pieces" d taken p) $ dropStack d taken
+          newStack <- toEither (dropError "couldn't drop on pieces" d taken p) $ stackStack dropOn droppedPieces
+          go p (replaceStack p b newStack) stackLeft ds
+
+
+
+dropError :: String -> Int -> Stack -> Pos -> String
+dropError cause n s p = " " ++ (show n) ++ " stones from stack: " ++ (show s) ++ " onto position: " ++ (show p) ++ " cause" ++ cause
+
+takeError :: Movement ->  String
+takeError m = "Cannot take" ++ (show $ takeStones m) ++ " from position: " ++ (show $ from m)
+-- posIsOwnedBy
+-- replace stack at pos by taking n pieces
+-- for each drop:
+--   get new position at Direction
+--   replace stack at new position by adding
 
 type Board = [(Pos, Stack)]
 

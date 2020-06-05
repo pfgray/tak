@@ -2,7 +2,7 @@ module Program where
 
 import Control.Monad.State.Lazy
 import AppState(AppState(..), GameState(..), CommandHistory(..), emptyCommandHistory)
-import Tak(Stack, Board, Player(..), Placement(..), placePiece, emptyBoard, invertPlayer, Piece(..))
+import Tak(Stack, Board, Player(..), Placement(..), placePiece, applyMovement, emptyBoard, invertPlayer, Piece(..), TurnResult)
 import Notation(Turn(..))
 
 type Program a = StateT AppState IO a
@@ -19,13 +19,32 @@ applyTurn (Left turn) = modify go
               newBoard = getOrElse (board s) (placePiece (currentTurn s) turn (board s))
               newTurn = invertPlayer (currentTurn s)
           in AppState (history st) (GameState newTurn newBoard ((Left turn) : (turns s)))
-applyTurn (Right movement) = modify id
+applyTurn (Right movement) = do
+  st       <- get
+  let s = gameState st
+      newTurn = invertPlayer (currentTurn s)
+      newBoardE = (applyMovement (currentTurn s) movement (board s))
+  case newBoardE of
+    (Left err) -> (liftIO $ putStrLn err)
+    (Right newBoard) -> do
+      _ <- liftIO $ putStrLn ("successfully generated new board: " ++ (printBoard newBoard))
+      _ <- put (AppState (history st) (GameState newTurn newBoard ((Right movement) : (turns s))))
+      return ()
 
+handleTurnResult :: a -> TurnResult a -> Program a
+handleTurnResult a (Left err) = do 
+  _ <- (liftIO $ putStrLn err)
+  return a
+handleTurnResult _ (Right a) = return a
+
+getOrElseE :: z -> Either b z -> z
+getOrElseE z (Left _) = z
+getOrElseE _ (Right z) = z
 
 printBoard :: Board -> String
 printBoard b = "\n" ++ (foldMap go b)
   where go :: ((Int, Char), Stack) -> String
-        go ((r, c), s) = (show r) ++ " " ++ [c] ++ " " ++ (show s) ++ "\n"
+        go ((r, c), s) = [c] ++ (show r) ++ " " ++ " " ++ (show s) ++ "\n"
 
 printState :: AppState -> String
 printState as = (printGameState $ gameState as)

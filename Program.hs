@@ -12,13 +12,17 @@ getOrElse a Nothing = a
 getOrElse _ (Just a) = a
 
 applyTurn :: Turn -> Program ()
-applyTurn (Left turn) = modify go
-  where go :: AppState -> AppState
-        go st =
-          let s = gameState st
-              newBoard = getOrElse (board s) (placePiece (currentTurn s) turn (board s))
-              newTurn = invertPlayer (currentTurn s)
-          in AppState (history st) (GameState newTurn newBoard ((Left turn) : (turns s)))
+applyTurn (Left turn) = do
+  st       <- get
+  let s = gameState st
+      newTurn = invertPlayer (currentTurn s)
+      newBoardO = (placePiece (currentTurn s) turn (board s))
+  case newBoardO of
+    (Nothing) ->  liftIO $ putStrLn $ "Couldn't place a piece there..."
+    (Just newBoard) -> do
+      _ <- liftIO $ putStrLn $ printBoard newBoard
+      _ <- put (AppState (history st) (GameState newTurn newBoard ((Left turn) : (turns s))))
+      return ()
 applyTurn (Right movement) = do
   st       <- get
   let s = gameState st
@@ -27,7 +31,7 @@ applyTurn (Right movement) = do
   case newBoardE of
     (Left err) -> (liftIO $ putStrLn err)
     (Right newBoard) -> do
-      _ <- liftIO $ putStrLn ("successfully generated new board: " ++ (printBoard newBoard))
+      _ <- liftIO $ putStrLn $ printBoard $ newBoard
       _ <- put (AppState (history st) (GameState newTurn newBoard ((Right movement) : (turns s))))
       return ()
 
